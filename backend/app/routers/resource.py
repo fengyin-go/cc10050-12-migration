@@ -94,5 +94,28 @@ def create_entry(module: str, payload: EntryPayload) -> ActionResult:
 @router.post("/{module}/{entry_id}/actions", response_model=ActionResult)
 def run_action(module: str, entry_id: int, payload: ActionPayload) -> ActionResult:
     service = require_service(module)
-    entry, message = service.run_action(entry_id, payload.action.strip())
-    return ActionResult(ok=entry is not None, message=message, entry=entry)
+    outcome = service.run_action(entry_id, payload.action.strip())
+    # 基础服务返回二元组；价格/比价等领域服务可返回 ok 与附加回执。
+    if isinstance(outcome, tuple):
+        if len(outcome) >= 4:
+            entry, message, ok, extra = outcome[:4]
+        elif len(outcome) == 3:
+            entry, message, ok = outcome
+            extra = {}
+        else:
+            entry, message = outcome
+            ok = entry is not None
+            extra = {}
+    else:
+        entry, message, ok, extra = outcome, "", outcome.get("ok", False), outcome
+    extra = extra if isinstance(extra, dict) else {}
+    return ActionResult(
+        ok=bool(ok),
+        message=message if isinstance(message, str) else str(message),
+        entry=entry,
+        receipt=extra.get("receipt"),
+        result=extra.get("result"),
+        missing=extra.get("missing"),
+        pending_verification=extra.get("pending_verification"),
+        extra={k: v for k, v in extra.items() if k not in {"receipt", "result", "missing", "pending_verification"}},
+    )

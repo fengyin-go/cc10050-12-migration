@@ -15,8 +15,16 @@ class BaseModuleService:
     ACTION_RULES: dict[str, str] = {}
     NEGATIVE_ACTIONS: list[str] = []
 
-    def list_entries(
+    def all_rows(self) -> list[dict[str, Any]]:
+        """数据行来源；子类可替换为 SQLite 或新旧合并视图。"""
+        return store.rows(self.MODULE)
+
+    def find_entry(self, entry_id: int) -> dict[str, Any] | None:
+        return store.find(self.MODULE, entry_id)
+
+    def _filter_and_paginate(
         self,
+        rows: list[dict[str, Any]],
         *,
         filters: dict[str, str] | None = None,
         keyword: str | None = None,
@@ -24,7 +32,7 @@ class BaseModuleService:
         page: int = 1,
         size: int = 20,
     ) -> tuple[list[dict[str, Any]], int]:
-        rows = list(store.rows(self.MODULE))
+        rows = list(rows)
         for field, expected in (filters or {}).items():
             if field in self.LIST_FIELDS:
                 rows = [
@@ -40,8 +48,21 @@ class BaseModuleService:
         start = (page - 1) * size
         return rows[start:start + size], total
 
+    def list_entries(
+        self,
+        *,
+        filters: dict[str, str] | None = None,
+        keyword: str | None = None,
+        status: str | None = None,
+        page: int = 1,
+        size: int = 20,
+    ) -> tuple[list[dict[str, Any]], int]:
+        return self._filter_and_paginate(
+            self.all_rows(), filters=filters, keyword=keyword, status=status, page=page, size=size
+        )
+
     def get_entry(self, entry_id: int) -> dict[str, Any] | None:
-        return store.find(self.MODULE, entry_id)
+        return self.find_entry(entry_id)
 
     def create_entry(self, values: dict[str, Any]) -> tuple[dict[str, Any] | None, list[str]]:
         missing = [
@@ -57,7 +78,12 @@ class BaseModuleService:
         entry["pending"] = True
         entry["abnormal"] = False
         rows.append(entry)
+        self.after_create(entry, values)
         return entry, []
+
+    def after_create(self, entry: dict[str, Any], values: dict[str, Any]) -> None:
+        """子类可把新登记记录同步到 SQLite/交接台账。"""
+        return None
 
     def run_action(self, entry_id: int, action: str) -> tuple[dict[str, Any] | None, str]:
         entry = store.find(self.MODULE, entry_id)

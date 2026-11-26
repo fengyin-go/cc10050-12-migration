@@ -9,10 +9,16 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
+from app.db import hydrate_legacy_store, init_db
 from app.routers import ROUTERS
+from app.routers import migration as migration_router
 from app.store import store
 
 app = FastAPI(title="商品价格监控采集平台", version="1.0.0")
+
+# 启动时确保 SQLite 结构存在，并把回滚/交接快照恢复到旧入口内存仓库。
+init_db()
+hydrate_legacy_store()
 
 app.add_middleware(
     CORSMiddleware,
@@ -33,6 +39,9 @@ def overview() -> dict[str, object]:
     """运营概览：把各业务模块的待处理量汇总成看板卡片。"""
     return store.overview()
 
+
+# 迁移/续办等固定路径必须先于 /api/{module} 动态资源路由注册。
+app.include_router(migration_router.router)
 
 # 资源路由含 /api/{module}，必须放在 health / overview 之后注册，
 # 否则固定路径会被动态路径抢先匹配。

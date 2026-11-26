@@ -5,6 +5,9 @@ services:
       - "8020:8020"
     environment:
       - APP_ENV=local
+      - PRICE_WATCH_SQLITE_PATH=/srv/app/data/price_watch.sqlite3
+    volumes:
+      - ./backend/data:/srv/app/data
   frontend:
     build: ./frontend
     ports:

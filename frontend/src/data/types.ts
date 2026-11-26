@@ -30,6 +30,11 @@ export type PageResult = {
 export type ActionResult = {
   ok: boolean
   message: string
+  missing?: string[]
+  pending_verification?: string[]
+  receipt?: Record<string, unknown>
+  result?: Record<string, unknown>
+  [key: string]: unknown
 }
 
 export type OverviewResult = {

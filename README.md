@@ -71,6 +71,70 @@ npm run dev
 | 人工复核队列 | `match_review` | 复核记录 | 记录编号、匹配记录、复核结论 |
 | 采集量指标 | `collect_metrics` | 指标记录 | 统计时间、站点名称、抓取量 |
 
+## SQLite 迁移与新旧入口续办
+
+价格基线库与未完成比价已增加 SQLite 持久化、版本绑定和交接回执；其他模块仍使用原内存示例仓库。
+默认数据库文件为 `backend/data/price_watch.sqlite3`，可用 `PRICE_WATCH_SQLITE_PATH`
+（或 `PRICE_WATCH_DB` / `DATABASE_PATH` / `DATABASE_URL=sqlite:...`）覆盖。
+
+常用接口：
+
+```bash
+# 构建/部署期原示例数据自检
+cd backend && .venv/bin/python -m app.verify
+
+# 幂等迁移并切换到 SQLite 新入口；重复调用不会复制受理
+curl -X POST http://127.0.0.1:8020/api/migration/start -H 'Content-Type: application/json' -d '{}'
+
+# 只原子迁移核对，不切换
+curl -X POST http://127.0.0.1:8020/api/migration/prepare -H 'Content-Type: application/json' -d '{}'
+
+# 迁移行数、价格、币种、来源清单
+curl http://127.0.0.1:8020/api/migration/inventory
+
+# 同一批次的旧/新入口实际回执
+curl http://127.0.0.1:8020/api/legacy/continuation/K
+curl http://127.0.0.1:8020/api/new/continuation/K
+
+# 旧入口继续、新入口领取/继续
+curl -X POST http://127.0.0.1:8020/api/legacy/continuation/K/continue \
+  -H 'Content-Type: application/json' \
+  -d '{"baseline_version_key":"L8@v1","site_prices":[{"site":"A站","price":35}]}'
+
+# 给未办任务登记计价依据、按绑定版本复算基线、追溯原记录
+curl -X POST http://127.0.0.1:8020/api/price_compare/8001/basis -H 'Content-Type: application/json' -d '{...}'
+curl -X POST http://127.0.0.1:8020/api/price_compare/8001/recompute-baseline -d '{}'
+curl http://127.0.0.1:8020/api/price_compare/8001/trace
+
+# 基线更正会追加新版本（例如 L8@v1=37 -> L8@v2=41），旧结果仍绑定原版本
+curl -X POST http://127.0.0.1:8020/api/price_baseline/L8/corrections \
+  -H 'Content-Type: application/json' -d '{"new_price":41,"reason":"核价更正"}'
+
+# 切换故障演练与回滚；SQLite 数据和唯一回执保留
+curl -X POST http://127.0.0.1:8020/api/migration/simulate-failure -d '{}'
+curl -X POST http://127.0.0.1:8020/api/migration/rollback -H 'Content-Type: application/json' -d '{"reason":"回滚"}'
+
+# 一键构造“两个规格 + 一份未完成 K + L8 37→41”交接演练
+curl -X POST http://127.0.0.1:8020/api/migration/scenarios/k-l8 \
+  -H 'Content-Type: application/json' \
+  -d '{"continue_during_handoff":true,"site_prices":[{"site":"A站","price":35}]}'
+
+# 命令行/CI 完整不变量自检
+cd backend && .venv/bin/python -I scripts/verify_handoff.py
+```
+
+续办回执中的 `receipt_type` / `kind` 为：
+
+- `confirmed_result`：已有确认结果，只能查看/追溯/复算，任何入口不能再领取成第二份有效结果；
+- `actionable_todo`：仍是可操作待办，可凭同一 `receipt_no` 继续或登记计价依据。
+
+存量基线没有币种时不会伪造币种，统一写为 `待核对` / `currency_status=missing_pending_check`。
+旧的已计算结果如果没有绑定价格版本、规格、来源或样本依据，复算接口返回
+`missing_calculation_basis`、具体 `missing` 缺项和 `original_record` 原记录，补齐前不会按当前价擅自复算。
+
+前端“价格基线库”和“比价计算器”页面顶部均有迁移/交接面板，可直接启动迁移、模拟故障回滚、
+构造 K/L8 演练，并同时读取旧入口与新入口的真实 HTTP 回执。
+
 ## 约定
 
 - 全部模块共享`frontend/src/views/WorkbenchView.vue|tsx`和一套资源路由。
